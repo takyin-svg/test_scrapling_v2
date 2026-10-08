@@ -1,5 +1,4 @@
 name: V3 Scrapling Test
-
 on:
   workflow_dispatch: # 允許在 GitHub 網頁上手動點擊 "Run workflow" 執行
 
@@ -23,8 +22,11 @@ jobs:
           # 安裝你的 requirements.txt
           pip install -r requirements.txt
           
-          # 🚨 關鍵防呆：改用 patchright 安裝隱匿版 Chromium 瀏覽器與系統依賴
-          python -m patchright install chromium --with-deps
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Install Playwright dependencies
+        run: playwright install --with-deps chromium
           
       - name: 🚀 執行 V3 獨立測試
         run: python test_main.py
