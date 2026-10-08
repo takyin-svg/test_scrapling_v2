@@ -23,9 +23,8 @@ jobs:
           # 安裝你的 requirements.txt
           pip install -r requirements.txt
           
-          # 🚨 關鍵防呆：Scrapling 的 DynamicSession 底層會用到 Playwright
-          # 在 GitHub 乾淨的 Ubuntu 虛擬機裡，必須補上這行來安裝無頭瀏覽器與系統依賴
-          python -m playwright install chromium --with-deps
+          # 🚨 關鍵防呆：改用 patchright 安裝隱匿版 Chromium 瀏覽器與系統依賴
+          python -m patchright install chromium --with-deps
           
       - name: 🚀 執行 V3 獨立測試
         run: python test_main.py
