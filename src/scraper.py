@@ -34,70 +34,83 @@ class ScraperV3:
         all_news = []
 
         with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
+            # sess.page 是底層 Playwright Page，用來做點擊互動
+            page = sess.page
             for source_idx, cfg in enumerate(self.configs):
                 source_name = cfg["name"]
                 pages_to_scrape = cfg.get("pages_to_scrape", 1)
                 next_sel = cfg.get("next_page_selector")
                 is_pagination_click = bool(next_sel)
+                wait_sel = cfg.get("wait_selector")
 
                 logger.info(f"🚀 開始抓取: [{source_name}] (目標深度: {pages_to_scrape} 頁)")
 
-                # 分兩種模式：
-                # 模式A：需要點擊下一頁翻頁（智通港股列表）
                 if is_pagination_click:
-                    # 先載入首頁
-                    current_page = sess.fetch(cfg["url"], wait_selector=cfg["wait_selector"])
-                    for page_num in range(1, pages_to_scrape + 1):
-                        logger.info(f"   -> 正在加載第 {page_num} 頁...")
+                    # ========== 點擊翻頁模式（智通港股列表）==========
+                    try:
+                        logger.info(f"   -> 載入首頁 {cfg['url']}")
+                        page.goto(cfg["url"], timeout=60000)
+                        # 等待目標區塊出現
+                        if wait_sel:
+                            page.wait_for_selector(wait_sel, timeout=60000)
 
-                        elements = current_page.css(cfg["target_css"])
-                        valid_items = []
-                        seen_links = set()
+                        for page_num in range(1, pages_to_scrape + 1):
+                            logger.info(f"   -> 正在萃取第 {page_num} 頁...")
+                            # 取得當前頁面 HTML，交由 Scrapling parse
+                            html = page.content()
+                            current_page = sess.get_response(html_content=html)
 
-                        for el in elements:
-                            raw_title = el.xpath(".//text()").getall()
-                            title = self.clean_text("".join(raw_title))
-                            if not self.is_valid_news(title):
-                                continue
+                            elements = current_page.css(cfg["target_css"])
+                            valid_items = []
+                            seen_links = set()
 
-                            if cfg.get("is_flash"):
-                                content_hash = hashlib.md5(title.encode('utf-8')).hexdigest()[:10]
-                                full_url = f"{cfg['url']}#flash_{content_hash}"
-                            else:
-                                raw_href = el.attrib.get("href", "") if el.attrib else ""
-                                if not raw_href or raw_href.startswith("javascript:"):
+                            for el in elements:
+                                raw_title = el.xpath(".//text()").getall()
+                                title = self.clean_text("".join(raw_title))
+                                if not self.is_valid_news(title):
                                     continue
-                                full_url = urljoin(cfg["url"], raw_href)
 
-                            if full_url not in seen_links:
-                                seen_links.add(full_url)
-                                valid_items.append({
-                                    "source": source_name,
-                                    "title": title,
-                                    "link": full_url
-                                })
+                                if cfg.get("is_flash"):
+                                    content_hash = hashlib.md5(title.encode('utf-8')).hexdigest()[:10]
+                                    full_url = f"{cfg['url']}#flash_{content_hash}"
+                                else:
+                                    raw_href = el.attrib.get("href", "") if el.attrib else ""
+                                    if not raw_href or raw_href.startswith("javascript:"):
+                                        continue
+                                    full_url = urljoin(cfg["url"], raw_href)
 
-                        all_news.extend(valid_items)
-                        logger.info(f"   ✅ 第 {page_num} 頁萃取完成，共 {len(valid_items)} 條有效新聞。")
-                        if valid_items:
-                            logger.info("   👀 [資料預覽]:")
-                            for item in valid_items[:3]:
-                                short_title = item['title'][:45] + "..." if len(item['title']) > 45 else item['title']
-                                logger.info(f"      - [{item['source']}] {short_title}")
+                                if full_url not in seen_links:
+                                    seen_links.add(full_url)
+                                    valid_items.append({
+                                        "source": source_name,
+                                        "title": title,
+                                        "link": full_url
+                                    })
 
-                        # 不是最後一頁，就點擊下一頁
-                        if page_num < pages_to_scrape:
-                            try:
-                                logger.info(f"   ⏳ 準備點擊下一頁...")
+                            all_news.extend(valid_items)
+                            logger.info(f"   ✅ 第 {page_num} 頁萃取完成，共 {len(valid_items)} 條有效新聞。")
+                            if valid_items:
+                                logger.info("   👀 [資料預覽]:")
+                                for item in valid_items[:3]:
+                                    short_title = item['title'][:45] + "..." if len(item['title']) > 45 else item['title']
+                                    logger.info(f"      - [{item['source']}] {short_title}")
+
+                            # 不是最後一頁，點擊下一頁
+                            if page_num < pages_to_scrape:
+                                logger.info(f"   ⏳ 準備點擊下一頁按鈕 {next_sel}")
                                 time.sleep(random.uniform(2, 4))
-                                # 點擊下一頁按鈕，等待新聞區塊重新載入
-                                current_page.click(next_sel, wait_selector=cfg["wait_selector"])
-                            except Exception as e:
-                                logger.error(f"❌ [{source_name}] 無法點擊下一頁，提早結束翻頁: {str(e)[:100]}")
-                                break
+                                # 使用 playwright page 點擊，不是 response.click
+                                page.wait_for_selector(next_sel, timeout=15000)
+                                page.click(next_sel)
+                                # 點擊後等待新聞區塊重新渲染
+                                page.wait_for_selector(wait_sel, timeout=60000)
+                                time.sleep(random.uniform(1,2))
+                    except Exception as e:
+                        logger.error(f"❌ [{source_name}] 翻頁流程異常: {str(e)[:150]}")
+                        continue
 
-                # 模式B：原本邏輯，直接URL渲染（7x24快訊）
                 else:
+                    # ========== 原始 fetch 模式（7x24快訊，不變）==========
                     for page_num in range(1, pages_to_scrape + 1):
                         target_url = cfg["url"].format(page=page_num) if "{page}" in cfg["url"] else cfg["url"]
                         try:
