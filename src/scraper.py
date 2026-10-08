@@ -4,7 +4,8 @@ import logging
 import random
 import time
 from urllib.parse import urljoin
-from scrapling.fetchers import DynamicSession
+# 🚨 引入 StealthyFetcher
+from scrapling.fetchers import DynamicSession, StealthyFetcher
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("ScraperV3")
@@ -32,13 +33,14 @@ class ScraperV3:
     def fetch_all(self):
         all_news = []
         
-        # 移除會引發警告的 adaptive，使用純淨的隱匿會話
+        # 啟動重量級瀏覽器會話 (供 7x24 快訊等需要 JS 的網站使用)
         with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
             for source_idx, cfg in enumerate(self.configs):
                 source_name = cfg["name"]
                 pages_to_scrape = cfg.get("pages_to_scrape", 1)
+                fetcher_type = cfg.get("fetcher_type", "dynamic")
                 
-                logger.info(f"🚀 開始抓取: [{source_name}] (目標深度: {pages_to_scrape} 頁)")
+                logger.info(f"🚀 開始抓取: [{source_name}] (模式: {fetcher_type.upper()}, 深度: {pages_to_scrape} 頁)")
                 
                 for page_num in range(1, pages_to_scrape + 1):
                     target_url = cfg["url"].format(page=page_num) if "{page}" in cfg["url"] else cfg["url"]
@@ -46,13 +48,17 @@ class ScraperV3:
                     try:
                         logger.info(f"   -> 正在加載第 {page_num} 頁...")
                         
-                        fetch_kwargs = {}
-                        if cfg.get("wait_selector"):
-                            fetch_kwargs["wait_selector"] = cfg["wait_selector"]
+                        # 🚨 雙引擎動態切換
+                        if fetcher_type == "stealth":
+                            # 【狙擊槍模式】直接以 HTTP 隱匿抓取純 HTML，無視 JS
+                            page = StealthyFetcher.fetch(target_url, headless=True)
+                        else:
+                            # 【坦克模式】使用 Playwright 瀏覽器渲染
+                            fetch_kwargs = {}
+                            if cfg.get("wait_selector"):
+                                fetch_kwargs["wait_selector"] = cfg["wait_selector"]
+                            page = sess.fetch(target_url, **fetch_kwargs)
                             
-                        page = sess.fetch(target_url, **fetch_kwargs)
-                        
-                        # 🚨 修正：移除 adaptive=True，直接使用精準 CSS 抓取
                         elements = page.css(cfg["target_css"])
                         
                         valid_items = []
