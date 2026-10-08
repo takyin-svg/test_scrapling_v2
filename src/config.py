@@ -5,12 +5,13 @@ SOURCE_CONFIGS = [
         "id": "zhitong_news",
         "name": "智通財經_港股新聞",
         "url": "https://www.zhitongcaijing.com/?index=ganggu&page={page}",
-        # 🚨 修正 1：還原 V2 成功過的標籤，用逗號隔開 (OR 邏輯)。只要出現其中一種，就解除等待！
-        "wait_selector": ".list-item, .article-item, .recommend-article-list, .news-list",
-        # 🚨 修正 2：對應的目標 CSS 也用逗號串聯，一網打盡
-        "target_css": ".list-item a, .article-item a, .recommend-article-list a, .news-list a",
+        "wait_selector": None,
+        # 覆蓋所有可能的列表標籤
+        "target_css": ".list-item a, .article-item a, .recommend-article-list a, div.content-wrap a, div.res-list a, .news-list a",
         "is_flash": False,
-        "pages_to_scrape": 2, 
+        "pages_to_scrape": 2,
+        # 🚨 關鍵升級：指定使用輕量級純 HTML 隱匿請求
+        "fetcher_type": "stealth" 
     },
     {
         "id": "zhitong_7x24",
@@ -20,5 +21,7 @@ SOURCE_CONFIGS = [
         "target_css": "div.allday-item-content",    
         "is_flash": True,
         "pages_to_scrape": 1,  
+        # 🚨 關鍵升級：指定使用重量級無頭瀏覽器
+        "fetcher_type": "dynamic"
     }
 ]
