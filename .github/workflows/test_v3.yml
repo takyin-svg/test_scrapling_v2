@@ -24,6 +24,9 @@ jobs:
           
       - name: Setup Chrome
         uses: browser-actions/setup-chrome@v1
+
+      - name: Install Playwright dependencies
+        run: playwright install --with-deps chromium
           
       - name: 🚀 執行 V3 獨立測試
         run: python test_main.py
