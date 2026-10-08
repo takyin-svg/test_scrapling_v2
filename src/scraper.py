@@ -32,22 +32,28 @@ class ScraperV3:
     def fetch_all(self):
         all_news = []
         
-        # 啟動 Scrapling 全自動動態會話
-        with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
+        # 🚨 修正 1：在初始化時正式啟動 adaptive=True 智能容錯引擎
+        with DynamicSession(headless=True, stealth=True, timeout=60000, adaptive=True) as sess:
             for source_idx, cfg in enumerate(self.configs):
                 source_name = cfg["name"]
                 pages_to_scrape = cfg.get("pages_to_scrape", 1)
                 
                 logger.info(f"🚀 開始抓取: [{source_name}] (目標深度: {pages_to_scrape} 頁)")
                 
-                # 🚨 新增：翻頁迴圈機制
+                # 翻頁迴圈機制
                 for page_num in range(1, pages_to_scrape + 1):
                     # 處理網址，如果有 {page} 標籤就進行替換
                     target_url = cfg["url"].format(page=page_num) if "{page}" in cfg["url"] else cfg["url"]
                     
                     try:
                         logger.info(f"   -> 正在加載第 {page_num} 頁...")
-                        page = sess.fetch(target_url, wait_selector=cfg["wait_selector"])
+                        
+                        # 🚨 修正 2：如果沒有設定 wait_selector，就讓它自然等待網頁載入完成
+                        fetch_kwargs = {}
+                        if cfg.get("wait_selector"):
+                            fetch_kwargs["wait_selector"] = cfg["wait_selector"]
+                            
+                        page = sess.fetch(target_url, **fetch_kwargs)
                         elements = page.css(cfg["target_css"], adaptive=True)
                         
                         valid_items = []
@@ -79,7 +85,7 @@ class ScraperV3:
                         
                         all_news.extend(valid_items)
                         
-                        # 🚨 新增：日誌預覽功能 (顯示該頁抓到的前 3 條與來源)
+                        # 日誌預覽功能 (顯示該頁抓到的前 3 條與來源)
                         logger.info(f"   ✅ 第 {page_num} 頁萃取完成，共 {len(valid_items)} 條有效新聞。")
                         if valid_items:
                             logger.info("   👀 [資料預覽]:")
