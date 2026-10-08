@@ -5,10 +5,10 @@ SOURCE_CONFIGS = [
         "id": "zhitong_news",
         "name": "智通財經_港股新聞",
         "url": "https://www.zhitongcaijing.com/?index=ganggu&page={page}",
-        # 🚨 修正：強制等待新聞區塊出現
-        "wait_selector": ".news-item",
-        # 🚨 修正：直擊新聞標題與連結所在的 a 標籤
-        "target_css": ".news-item .title a",
+        # 🚨 修正 1：還原 V2 成功過的標籤，用逗號隔開 (OR 邏輯)。只要出現其中一種，就解除等待！
+        "wait_selector": ".list-item, .article-item, .recommend-article-list, .news-list",
+        # 🚨 修正 2：對應的目標 CSS 也用逗號串聯，一網打盡
+        "target_css": ".list-item a, .article-item a, .recommend-article-list a, .news-list a",
         "is_flash": False,
         "pages_to_scrape": 2, 
     },
