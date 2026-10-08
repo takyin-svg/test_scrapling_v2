@@ -5,10 +5,10 @@ SOURCE_CONFIGS = [
         "id": "zhitong_news",
         "name": "智通財經_港股新聞",
         "url": "https://www.zhitongcaijing.com/?index=ganggu&page={page}",
-        # 🚨 移除嚴格的 wait_selector，讓 Scrapling 自動判斷網頁載入
-        "wait_selector": None,
-        # 🚨 給它所有可能的候選名單，讓 adaptive 演算法自動命中
-        "target_css": ".list-item a, .article-item a, .recommend-article-list a, div.res-list a, .news-list a",
+        # 🚨 修正：強制等待新聞區塊出現
+        "wait_selector": ".news-item",
+        # 🚨 修正：直擊新聞標題與連結所在的 a 標籤
+        "target_css": ".news-item .title a",
         "is_flash": False,
         "pages_to_scrape": 2, 
     },
