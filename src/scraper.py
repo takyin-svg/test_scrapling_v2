@@ -42,6 +42,8 @@ class ScraperV3:
             # --- 將翻頁與解析邏輯獨立出來，避免代碼重複 ---
             def _scrape_pages(fetch_func):
                 source_news = []
+                seen_links = set() # 🚨 已經移到翻頁迴圈外部，確保跨頁去重機制生效！
+                
                 for page_num in range(1, pages_to_scrape + 1):
                     target_url = cfg["url"].format(page=page_num) if "{page}" in cfg["url"] else cfg["url"]
                     
@@ -51,7 +53,6 @@ class ScraperV3:
                         elements = page.css(cfg["target_css"])
                         
                         valid_items = []
-                        seen_links = set()
                         
                         for el in elements:
                             raw_title = el.xpath(".//text()").getall() 
@@ -93,7 +94,7 @@ class ScraperV3:
                 return source_news
             # -----------------------------------------------
 
-            # 🚨 關鍵修復：嚴格隔離兩種爬蟲引擎，避免 Event Loop 衝突
+            # 🚨 嚴格隔離兩種爬蟲引擎，避免 Event Loop 衝突
             if fetcher_type == "stealth":
                 # 狙擊槍模式：在乾淨環境下執行，不啟動 DynamicSession
                 all_news.extend(_scrape_pages(lambda url: StealthyFetcher.fetch(url, headless=True)))
