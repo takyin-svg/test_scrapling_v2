@@ -32,29 +32,28 @@ class ScraperV3:
     def fetch_all(self):
         all_news = []
         
-        # 🚨 修正 1：在初始化時正式啟動 adaptive=True 智能容錯引擎
-        with DynamicSession(headless=True, stealth=True, timeout=60000, adaptive=True) as sess:
+        # 移除會引發警告的 adaptive，使用純淨的隱匿會話
+        with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
             for source_idx, cfg in enumerate(self.configs):
                 source_name = cfg["name"]
                 pages_to_scrape = cfg.get("pages_to_scrape", 1)
                 
                 logger.info(f"🚀 開始抓取: [{source_name}] (目標深度: {pages_to_scrape} 頁)")
                 
-                # 翻頁迴圈機制
                 for page_num in range(1, pages_to_scrape + 1):
-                    # 處理網址，如果有 {page} 標籤就進行替換
                     target_url = cfg["url"].format(page=page_num) if "{page}" in cfg["url"] else cfg["url"]
                     
                     try:
                         logger.info(f"   -> 正在加載第 {page_num} 頁...")
                         
-                        # 🚨 修正 2：如果沒有設定 wait_selector，就讓它自然等待網頁載入完成
                         fetch_kwargs = {}
                         if cfg.get("wait_selector"):
                             fetch_kwargs["wait_selector"] = cfg["wait_selector"]
                             
                         page = sess.fetch(target_url, **fetch_kwargs)
-                        elements = page.css(cfg["target_css"], adaptive=True)
+                        
+                        # 🚨 修正：移除 adaptive=True，直接使用精準 CSS 抓取
+                        elements = page.css(cfg["target_css"])
                         
                         valid_items = []
                         seen_links = set()
@@ -85,24 +84,20 @@ class ScraperV3:
                         
                         all_news.extend(valid_items)
                         
-                        # 日誌預覽功能 (顯示該頁抓到的前 3 條與來源)
                         logger.info(f"   ✅ 第 {page_num} 頁萃取完成，共 {len(valid_items)} 條有效新聞。")
                         if valid_items:
                             logger.info("   👀 [資料預覽]:")
                             for item in valid_items[:3]:
-                                # 限制標題預覽長度為 45 字元
                                 short_title = item['title'][:45] + "..." if len(item['title']) > 45 else item['title']
                                 logger.info(f"      - [{item['source']}] {short_title}")
                         
-                        # 同一個來源的翻頁延遲
                         if page_num < pages_to_scrape:
                             time.sleep(random.uniform(2, 4))
                             
                     except Exception as e:
                         logger.error(f"❌ [{source_name}] 第 {page_num} 頁抓取失敗: {str(e)[:100]}")
-                        break # 如果第一頁就壞了，就不用再翻第二頁了
+                        break
                 
-                # 源頭切換間的禮貌延遲
                 if source_idx < len(self.configs) - 1:
                     time.sleep(random.uniform(4, 7))
                     
