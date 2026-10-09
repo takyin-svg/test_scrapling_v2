@@ -1,7 +1,7 @@
 import random
 import time
 from urllib.parse import urljoin
-from curl_cffi import requests
+import requests
 from bs4 import BeautifulSoup
 
 MAX_PAGE = 3
@@ -19,13 +19,10 @@ def fetch_zhitong_mobile(page_num: int):
         resp = requests.get(
             base_url,
             headers=headers,
-            impersonate="safari17",
             timeout=20
         )
         resp.raise_for_status()
-        # ✅重點：唔使用resp.text，改用content手動decode utf‑8，解決latin‑1編碼報錯
-        html = resp.content.decode("utf‑8", errors="replace")
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(resp.text, "html.parser")
         news_list = []
         items = soup.select("ul.news-list li a")
         for item in items:
