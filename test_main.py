@@ -1,4 +1,9 @@
-from src.scraper import ScraperV3
+import sys
+from pathlib import Path
+# 將 src 資料夾加入 Python 搜尋路徑
+sys.path.append(str(Path(__file__).parent / "src"))
+
+from scraper import ScraperV3
 from config import CONFIGS
 
 def run_test():
