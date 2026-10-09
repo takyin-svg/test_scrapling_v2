@@ -64,31 +64,25 @@ class ScraperV3:
         with DynamicSession(headless=True, timeout=60000) as sess:
             for cfg in self.configs:
                 name = cfg["name"]
-                url = cfg["url"]
+                url_tpl = cfg["url_template"]
                 wait_sel = cfg["wait_selector"]
                 target_sel = cfg["target_css"]
                 pages_total = cfg.get("pages_to_scrape", 1)
-                next_sel = cfg.get("next_selector")
                 is_flash = cfg.get("is_flash", False)
 
                 logger.info(f"🚀 開始抓取：{name}，計劃抓取 {pages_total} 頁")
 
-                # page_action：呢個函數入面先可以操作 playwright page
-                def action_click_next(page):
-                    time.sleep(random.uniform(1, 2))
-                    page.wait_for_selector(next_sel, timeout=15000)
-                    page.click(next_sel)
-                    page.wait_for_selector(wait_sel, timeout=60000)
-
                 for page_num in range(1, pages_total + 1):
                     try:
-                        fetch_args = {"wait_selector": wait_sel}
-                        # 由第2頁開始，每次fetch執行一次點擊下一頁
-                        if page_num > 1 and next_sel:
-                            fetch_args["page_action"] = action_click_next
+                        # 替換page參數
+                        if "{page}" in url_tpl:
+                            target_url = url_tpl.format(page=page_num)
+                        else:
+                            target_url = url_tpl
 
-                        resp = sess.fetch(url, **fetch_args)
-                        news = self.parse_response(resp, name, url, is_flash, target_sel)
+                        logger.info(f"   -> 訪問: {target_url}")
+                        resp = sess.fetch(target_url, wait_selector=wait_sel)
+                        news = self.parse_response(resp, name, target_url, is_flash, target_sel)
                         all_news.extend(news)
                         logger.info(f"✅ {name} 第 {page_num} 頁，撈到 {len(news)} 條新聞")
                         if news:
