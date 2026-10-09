@@ -22,8 +22,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
 
-      - name: Install Playwright browsers & system deps  # ✅修正這行
-        run: python -m playwright install --with-deps chromium
-
       - name: Run zhitong crawler
         run: python scripts/zhitong_crawler.py
