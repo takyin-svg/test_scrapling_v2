@@ -5,96 +5,88 @@ import re
 from scrapling.fetchers import DynamicSession
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
-logger = logging.getLogger("FlashAPI")
+logger = logging.getLogger("FlashFastTest")
+
+def fetch_extra_via_js(page):
+    """
+    自訂 page_action:
+    完全不滾動！直接調用智通財經網頁自帶的 window.GET 函式，
+    由瀏覽器核心在內部發起請求，秒級獲取後續 20 條資料並注入全域變數中。
+    """
+    logger.info("⏳ [page_action] 等待首頁節點載入...")
+    page.wait_for_selector("div.allday-item-content", timeout=30000)
+    
+    # 1. 取得翻頁時間戳記
+    timestamp = page.evaluate("""() => {
+        const box = document.querySelector('div.allday-box');
+        return box ? box.getAttribute('data-page') : null;
+    }""")
+    logger.info(f"🔑 [page_action] 瀏覽器內取得時間戳記: {timestamp}")
+    
+    # 2. 如果拿到時間戳記，直接調用原生的 window.GET 請求第二批資料
+    if timestamp:
+        logger.info("⚡ [page_action] 直接執行網頁原生 window.GET 拉取第二批（免滾動等待）...")
+        page.evaluate(f"""async () => {{
+            window.__EXTRA_NEWS__ = [];
+            try {{
+                const res = await window.GET("/immediately/content-list.html?type=ganggu", {{
+                    last_update_time: "{timestamp}"
+                }});
+                if (res && res[1] && res[1].list) {{
+                    window.__EXTRA_NEWS__ = res[1].list;
+                }}
+            }} catch (e) {{
+                console.error("fetch error", e);
+            }}
+        }}""")
 
 def get_40_flash():
-    base_url = "https://www.zhitongcaijing.com"
-    first_page_url = f"{base_url}/immediately.html?type=ganggu"
+    target_url = "https://www.zhitongcaijing.com/immediately.html?type=ganggu"
+    target_count = 40
     
     logger.info("=" * 60)
-    logger.info("🚀 正在抓取智通財經 7x24 快訊（目標：40 條）")
+    logger.info(f"🚀 開始測試：智通財經 7x24 快訊（原生 JS 直取 40 條，免滾動）")
     logger.info("=" * 60)
     
     items = []
     seen_texts = set()
     
-    # 1. 透過 DynamicSession 載入首頁並取得前 20 條
     with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
-        logger.info("📥 正在透過 DynamicSession 載入首頁...")
-        page = sess.fetch(first_page_url, wait_selector="div.allday-item-content")
+        response = sess.fetch(
+            target_url,
+            wait_selector="div.allday-item-content",
+            page_action=fetch_extra_via_js
+        )
         
-        dom_items = page.css("div.allday-item-content")
-        for el in dom_items:
+        # 1. 提取首頁原本的 20 條 (SSR)
+        elements = response.css("div.allday-item-content")
+        for el in elements:
             raw_text = "".join(el.xpath(".//text()").getall()).strip()
             clean_text = raw_text.replace("编辑解读", "").replace("添加解读", "").strip()
             if len(clean_text) > 15 and clean_text not in seen_texts:
                 seen_texts.add(clean_text)
                 items.append(clean_text)
                 
-        logger.info(f"✅ 第一批（首頁 SSR）成功取得: {len(items)} 條")
+        logger.info(f"✅ 第一批（首頁原生）取得: {len(items)} 條")
         
-        # 2. 取得第二頁的翻頁時間戳記 (data-page)
-        allday_box = page.css("div.allday-box")
-        last_timestamp = None
-        if allday_box and "data-page" in allday_box[0].attrib:
-            last_timestamp = allday_box[0].attrib["data-page"]
-            
-        if not last_timestamp:
-            match = re.search(r'data-page="(\d+)"', page.text)
-            if match:
-                last_timestamp = match.group(1)
+        # 2. 直接從瀏覽器取出剛才 JS 拉回來的第二批資料 (API)
+        extra_list = sess.page.evaluate("() => window.__EXTRA_NEWS__ || []")
+        logger.info(f"📦 第二批（原生 JS 直取）回傳: {len(extra_list)} 條原始資料")
+        
+        for item in extra_list:
+            raw_content = item.get("content", "")
+            # 去除 HTML tag
+            clean_content = re.sub(r'<[^>]+>', '', raw_content).strip()
+            clean_content = clean_content.replace("编辑解读", "").replace("添加解读", "").strip()
+            if len(clean_content) > 15 and clean_content not in seen_texts:
+                seen_texts.add(clean_content)
+                items.append(clean_content)
                 
-        logger.info(f"🔑 取得第二頁時間戳記: {last_timestamp}")
-        
-        # 3. 請求第二批資料（直接按 HTML 片段與備用 JSON 解析）
-        if last_timestamp:
-            api_url = f"{base_url}/immediately/content-list.html?type=ganggu&last_update_time={last_timestamp}"
-            logger.info(f"📡 正在請求 API 獲取第 21~40 條: {api_url}")
-            
-            # 帶上 AJAX 請求標頭
-            api_res = sess.fetch(
-                api_url,
-                headers={"X-Requested-With": "XMLHttpRequest"}
-            )
-            
-            res_text = api_res.text.strip()
-            added_count = 0
-            
-            # 嘗試路徑 A: 回傳純 HTML 片段
-            html_elements = api_res.css("div.allday-item-content, .allday-item")
-            if html_elements:
-                for el in html_elements:
-                    raw_text = "".join(el.xpath(".//text()").getall()).strip()
-                    clean_text = raw_text.replace("编辑解读", "").replace("添加解读", "").strip()
-                    if len(clean_text) > 15 and clean_text not in seen_texts:
-                        seen_texts.add(clean_text)
-                        items.append(clean_text)
-                        added_count += 1
-                logger.info(f"✅ 第二批（HTML 片段解析）追加成功: {added_count} 條")
-            else:
-                # 嘗試路徑 B: 嘗試解析 JSON 結構
-                try:
-                    data = json.loads(res_text)
-                    news_list = []
-                    if isinstance(data, list) and len(data) > 1 and "list" in data[1]:
-                        news_list = data[1]["list"]
-                    elif isinstance(data, dict) and "data" in data:
-                        news_list = data["data"]
-                        
-                    for item in news_list:
-                        raw_content = item.get("content", "")
-                        clean_content = re.sub(r'<[^>]+>', '', raw_content).strip()
-                        clean_content = clean_content.replace("编辑解读", "").replace("添加解读", "").strip()
-                        if len(clean_content) > 15 and clean_content not in seen_texts:
-                            seen_texts.add(clean_content)
-                            items.append(clean_content)
-                            added_count += 1
-                    logger.info(f"✅ 第二批（JSON 解析）追加成功: {added_count} 條")
-                except Exception:
-                    logger.warning(f"⚠️ 第二批資料前 200 字元預覽: {res_text[:200]}")
+            if len(items) >= target_count:
+                break
 
     logger.info("=" * 60)
-    logger.info(f"🎉 總共抓取到: {len(items)} 條快訊！")
+    logger.info(f"🎉 抓取成功！去重後總共取得: {len(items)} 條快訊！")
     logger.info("=" * 60)
     logger.info("📋 [新聞清單完整預覽]:")
     for idx, title in enumerate(items[:40], 1):
