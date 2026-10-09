@@ -23,7 +23,9 @@ def fetch_zhitong_mobile(page_num: int):
             timeout=20
         )
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
+        # ✅重點：唔使用resp.text，改用content手動decode utf‑8，解決latin‑1編碼報錯
+        html = resp.content.decode("utf‑8", errors="replace")
+        soup = BeautifulSoup(html, "html.parser")
         news_list = []
         items = soup.select("ul.news-list li a")
         for item in items:
