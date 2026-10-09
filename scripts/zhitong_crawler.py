@@ -8,11 +8,15 @@ MAX_PAGE = 3
 SLEEP_MIN = 0.5
 SLEEP_MAX = 1.2
 
+def safe_str(s: str) -> str:
+    """過濾掉會導致latin‑1編碼崩潰的字符"""
+    return s.encode("utf‑8", errors="replace").decode("utf‑8")
+
 def fetch_zhitong_mobile(page_num: int):
     base_url = f"https://m.zhitongcaijing.com/market.html?page={page_num}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        "Accept-Language": "zh‑CN,zh;q=0.9",
+        "User‑Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "Accept‑Language": "zh‑CN,zh;q=0.9",
         "Referer": "https://m.zhitongcaijing.com/"
     }
     try:
@@ -24,9 +28,9 @@ def fetch_zhitong_mobile(page_num: int):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         news_list = []
-        items = soup.select("ul.news-list li a")
+        items = soup.select("ul.news‑list li a")
         for item in items:
-            title = item.get_text(strip=True)
+            title = safe_str(item.get_text(strip=True))
             href = item.get("href", "")
             if not title or len(title) < 5 or not href:
                 continue
@@ -38,7 +42,7 @@ def fetch_zhitong_mobile(page_num: int):
             })
         return news_list
     except Exception as e:
-        print(f"[MOBILE] page={page_num} 抓取異常: {str(e)}")
+        print(f"[MOBILE] page={page_num} 抓取異常: {safe_str(str(e))}")
         return []
 
 
