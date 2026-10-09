@@ -16,8 +16,9 @@ def get_40_flash():
     logger.info("=" * 60)
     
     items = []
+    seen_texts = set()
     
-    # 1. 使用已驗證穩定的 DynamicSession 載入首頁並取得前 20 條
+    # 1. 透過 DynamicSession 載入首頁並取得前 20 條
     with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
         logger.info("📥 正在透過 DynamicSession 載入首頁...")
         page = sess.fetch(first_page_url, wait_selector="div.allday-item-content")
@@ -26,7 +27,8 @@ def get_40_flash():
         for el in dom_items:
             raw_text = "".join(el.xpath(".//text()").getall()).strip()
             clean_text = raw_text.replace("编辑解读", "").replace("添加解读", "").strip()
-            if len(clean_text) > 15:
+            if len(clean_text) > 15 and clean_text not in seen_texts:
+                seen_texts.add(clean_text)
                 items.append(clean_text)
                 
         logger.info(f"✅ 第一批（首頁 SSR）成功取得: {len(items)} 條")
@@ -44,31 +46,52 @@ def get_40_flash():
                 
         logger.info(f"🔑 取得第二頁時間戳記: {last_timestamp}")
         
-        # 3. 沿用同一個 session 請求後續 API（自動帶有 Cookie 與 Session 狀態）
+        # 3. 請求第二批資料（直接按 HTML 片段與備用 JSON 解析）
         if last_timestamp:
             api_url = f"{base_url}/immediately/content-list.html?type=ganggu&last_update_time={last_timestamp}"
             logger.info(f"📡 正在請求 API 獲取第 21~40 條: {api_url}")
             
-            api_res = sess.fetch(api_url)
-            try:
-                # 解析 API 回傳的 JSON
-                data = json.loads(api_res.text)
-                news_list = []
-                if isinstance(data, list) and len(data) > 1 and "list" in data[1]:
-                    news_list = data[1]["list"]
-                elif isinstance(data, dict) and "data" in data:
-                    news_list = data["data"]
-                    
-                for item in news_list:
-                    raw_content = item.get("content", "")
-                    clean_content = re.sub(r'<[^>]+>', '', raw_content).strip()
-                    clean_content = clean_content.replace("编辑解读", "").replace("添加解读", "").strip()
-                    if clean_content and len(clean_content) > 15:
-                        items.append(clean_content)
+            # 帶上 AJAX 請求標頭
+            api_res = sess.fetch(
+                api_url,
+                headers={"X-Requested-With": "XMLHttpRequest"}
+            )
+            
+            res_text = api_res.text.strip()
+            added_count = 0
+            
+            # 嘗試路徑 A: 回傳純 HTML 片段
+            html_elements = api_res.css("div.allday-item-content, .allday-item")
+            if html_elements:
+                for el in html_elements:
+                    raw_text = "".join(el.xpath(".//text()").getall()).strip()
+                    clean_text = raw_text.replace("编辑解读", "").replace("添加解读", "").strip()
+                    if len(clean_text) > 15 and clean_text not in seen_texts:
+                        seen_texts.add(clean_text)
+                        items.append(clean_text)
+                        added_count += 1
+                logger.info(f"✅ 第二批（HTML 片段解析）追加成功: {added_count} 條")
+            else:
+                # 嘗試路徑 B: 嘗試解析 JSON 結構
+                try:
+                    data = json.loads(res_text)
+                    news_list = []
+                    if isinstance(data, list) and len(data) > 1 and "list" in data[1]:
+                        news_list = data[1]["list"]
+                    elif isinstance(data, dict) and "data" in data:
+                        news_list = data["data"]
                         
-                logger.info(f"✅ 第二批（API 請求）追加成功: {len(news_list)} 條")
-            except Exception as e:
-                logger.error(f"❌ 解析 API 失敗: {e}")
+                    for item in news_list:
+                        raw_content = item.get("content", "")
+                        clean_content = re.sub(r'<[^>]+>', '', raw_content).strip()
+                        clean_content = clean_content.replace("编辑解读", "").replace("添加解读", "").strip()
+                        if len(clean_content) > 15 and clean_content not in seen_texts:
+                            seen_texts.add(clean_content)
+                            items.append(clean_content)
+                            added_count += 1
+                    logger.info(f"✅ 第二批（JSON 解析）追加成功: {added_count} 條")
+                except Exception:
+                    logger.warning(f"⚠️ 第二批資料前 200 字元預覽: {res_text[:200]}")
 
     logger.info("=" * 60)
     logger.info(f"🎉 總共抓取到: {len(items)} 條快訊！")
