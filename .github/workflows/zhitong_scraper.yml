@@ -25,4 +25,6 @@ jobs:
       - name: Run zhitong crawler
         env:
           PYTHONIOENCODING: utf-8
+          LC_ALL: C.UTF-8
+          LANG: C.UTF-8
         run: python scripts/zhitong_crawler.py
