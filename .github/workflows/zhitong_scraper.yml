@@ -1,7 +1,6 @@
 name: Zhitong Scraper
 on:
   schedule:
-    # 示例HKT時段，按你自己的主備cron修改
     - cron: '0 0 * * *'
   workflow_dispatch:
 
@@ -18,16 +17,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Upgrade pip & install python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt
-          playwright install --with-deps chromium
+
+      - name: Install Playwright browsers & system deps  # ✅修正這行
+        run: python -m playwright install --with-deps chromium
 
       - name: Run zhitong crawler
-        run: |
-          python scripts/zhitong_crawler.py
-
-      # 可按需加入：保存輸出json、飛書推送、緩存push_cache.json
-      # - name: Save result
-      #   run: cp output.json ./
+        run: python scripts/zhitong_crawler.py
