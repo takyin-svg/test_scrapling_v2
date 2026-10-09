@@ -18,150 +18,86 @@ class ScraperV3:
     def clean_text(self, raw_text: str) -> str:
         if not raw_text:
             return ""
-        text = raw_text
-        for nw in self.noise_words:
-            text = text.replace(nw, "")
-        return text.strip()
+        txt = raw_text
+        for w in self.noise_words:
+            txt = txt.replace(w, "")
+        return txt.strip()
 
-    def is_valid_news(self, title: str) -> bool:
+    def is_valid_title(self, title: str) -> bool:
         if len(title) < 15:
             return False
-        if any(w in title.lower() for w in self.discard_words):
-            return False
+        for w in self.discard_words:
+            if w in title.lower():
+                return False
         return True
+
+    def parse_response(self, resp, source_name, base_url, is_flash, target_css):
+        items = []
+        seen = set()
+        elements = resp.css(target_css)
+        for el in elements:
+            raw_title = "".join(el.xpath(".//text()").getall())
+            title = self.clean_text(raw_title)
+            if not self.is_valid_title(title):
+                continue
+
+            if is_flash:
+                uid = hashlib.md5(title.encode("utf-8")).hexdigest()[:10]
+                link = f"{base_url}#flash_{uid}"
+            else:
+                href = el.attrib.get("href", "")
+                if not href or href.startswith("javascript:"):
+                    continue
+                link = urljoin(base_url, href)
+
+            if link not in seen:
+                seen.add(link)
+                items.append({
+                    "source": source_name,
+                    "title": title,
+                    "url": link
+                })
+        return items
 
     def fetch_all(self):
         all_news = []
+        with DynamicSession(headless=True, timeout=60000) as sess:
+            for cfg in self.configs:
+                name = cfg["name"]
+                url = cfg["url"]
+                wait_sel = cfg["wait_selector"]
+                target_sel = cfg["target_css"]
+                pages_total = cfg.get("pages_to_scrape", 1)
+                next_sel = cfg.get("next_selector")
+                is_flash = cfg.get("is_flash", False)
 
-        with DynamicSession(headless=True, stealth=True, timeout=60000) as sess:
-            # sess.page 是底層 Playwright Page，用來做點擊互動
-            page = sess.page
-            for source_idx, cfg in enumerate(self.configs):
-                source_name = cfg["name"]
-                pages_to_scrape = cfg.get("pages_to_scrape", 1)
-                next_sel = cfg.get("next_page_selector")
-                is_pagination_click = bool(next_sel)
-                wait_sel = cfg.get("wait_selector")
+                logger.info(f"🚀 開始抓取：{name}，計劃抓取 {pages_total} 頁")
 
-                logger.info(f"🚀 開始抓取: [{source_name}] (目標深度: {pages_to_scrape} 頁)")
+                # page_action：呢個函數入面先可以操作 playwright page
+                def action_click_next(page):
+                    time.sleep(random.uniform(1, 2))
+                    page.wait_for_selector(next_sel, timeout=15000)
+                    page.click(next_sel)
+                    page.wait_for_selector(wait_sel, timeout=60000)
 
-                if is_pagination_click:
-                    # ========== 點擊翻頁模式（智通港股列表）==========
+                for page_num in range(1, pages_total + 1):
                     try:
-                        logger.info(f"   -> 載入首頁 {cfg['url']}")
-                        page.goto(cfg["url"], timeout=60000)
-                        # 等待目標區塊出現
-                        if wait_sel:
-                            page.wait_for_selector(wait_sel, timeout=60000)
+                        fetch_args = {"wait_selector": wait_sel}
+                        # 由第2頁開始，每次fetch執行一次點擊下一頁
+                        if page_num > 1 and next_sel:
+                            fetch_args["page_action"] = action_click_next
 
-                        for page_num in range(1, pages_to_scrape + 1):
-                            logger.info(f"   -> 正在萃取第 {page_num} 頁...")
-                            # 取得當前頁面 HTML，交由 Scrapling parse
-                            html = page.content()
-                            current_page = sess.get_response(html_content=html)
+                        resp = sess.fetch(url, **fetch_args)
+                        news = self.parse_response(resp, name, url, is_flash, target_sel)
+                        all_news.extend(news)
+                        logger.info(f"✅ {name} 第 {page_num} 頁，撈到 {len(news)} 條新聞")
+                        if news:
+                            for item in news[:3]:
+                                logger.info(f"    - {item['title']}")
 
-                            elements = current_page.css(cfg["target_css"])
-                            valid_items = []
-                            seen_links = set()
-
-                            for el in elements:
-                                raw_title = el.xpath(".//text()").getall()
-                                title = self.clean_text("".join(raw_title))
-                                if not self.is_valid_news(title):
-                                    continue
-
-                                if cfg.get("is_flash"):
-                                    content_hash = hashlib.md5(title.encode('utf-8')).hexdigest()[:10]
-                                    full_url = f"{cfg['url']}#flash_{content_hash}"
-                                else:
-                                    raw_href = el.attrib.get("href", "") if el.attrib else ""
-                                    if not raw_href or raw_href.startswith("javascript:"):
-                                        continue
-                                    full_url = urljoin(cfg["url"], raw_href)
-
-                                if full_url not in seen_links:
-                                    seen_links.add(full_url)
-                                    valid_items.append({
-                                        "source": source_name,
-                                        "title": title,
-                                        "link": full_url
-                                    })
-
-                            all_news.extend(valid_items)
-                            logger.info(f"   ✅ 第 {page_num} 頁萃取完成，共 {len(valid_items)} 條有效新聞。")
-                            if valid_items:
-                                logger.info("   👀 [資料預覽]:")
-                                for item in valid_items[:3]:
-                                    short_title = item['title'][:45] + "..." if len(item['title']) > 45 else item['title']
-                                    logger.info(f"      - [{item['source']}] {short_title}")
-
-                            # 不是最後一頁，點擊下一頁
-                            if page_num < pages_to_scrape:
-                                logger.info(f"   ⏳ 準備點擊下一頁按鈕 {next_sel}")
-                                time.sleep(random.uniform(2, 4))
-                                # 使用 playwright page 點擊，不是 response.click
-                                page.wait_for_selector(next_sel, timeout=15000)
-                                page.click(next_sel)
-                                # 點擊後等待新聞區塊重新渲染
-                                page.wait_for_selector(wait_sel, timeout=60000)
-                                time.sleep(random.uniform(1,2))
+                        if page_num < pages_total:
+                            time.sleep(random.uniform(2, 4))
                     except Exception as e:
-                        logger.error(f"❌ [{source_name}] 翻頁流程異常: {str(e)[:150]}")
-                        continue
-
-                else:
-                    # ========== 原始 fetch 模式（7x24快訊，不變）==========
-                    for page_num in range(1, pages_to_scrape + 1):
-                        target_url = cfg["url"].format(page=page_num) if "{page}" in cfg["url"] else cfg["url"]
-                        try:
-                            logger.info(f"   -> 正在加載第 {page_num} 頁...")
-                            fetch_kwargs = {}
-                            if cfg.get("wait_selector"):
-                                fetch_kwargs["wait_selector"] = cfg["wait_selector"]
-                            current_page = sess.fetch(target_url,** fetch_kwargs)
-
-                            elements = current_page.css(cfg["target_css"])
-                            valid_items = []
-                            seen_links = set()
-
-                            for el in elements:
-                                raw_title = el.xpath(".//text()").getall()
-                                title = self.clean_text("".join(raw_title))
-                                if not self.is_valid_news(title):
-                                    continue
-
-                                if cfg.get("is_flash"):
-                                    content_hash = hashlib.md5(title.encode('utf-8')).hexdigest()[:10]
-                                    full_url = f"{cfg['url']}#flash_{content_hash}"
-                                else:
-                                    raw_href = el.attrib.get("href", "") if el.attrib else ""
-                                    if not raw_href or raw_href.startswith("javascript:"):
-                                        continue
-                                    full_url = urljoin(cfg["url"], raw_href)
-
-                                if full_url not in seen_links:
-                                    seen_links.add(full_url)
-                                    valid_items.append({
-                                        "source": source_name,
-                                        "title": title,
-                                        "link": full_url
-                                    })
-
-                            all_news.extend(valid_items)
-                            logger.info(f"   ✅ 第 {page_num} 頁萃取完成，共 {len(valid_items)} 條有效新聞。")
-                            if valid_items:
-                                logger.info("   👀 [資料預覽]:")
-                                for item in valid_items[:3]:
-                                    short_title = item['title'][:45] + "..." if len(item['title']) > 45 else item['title']
-                                    logger.info(f"      - [{item['source']}] {short_title}")
-
-                            if page_num < pages_to_scrape:
-                                time.sleep(random.uniform(2, 4))
-                        except Exception as e:
-                            logger.error(f"❌ [{source_name}] 第 {page_num} 頁抓取失敗: {str(e)[:100]}")
-                            break
-
-                if source_idx < len(self.configs) - 1:
-                    time.sleep(random.uniform(4, 7))
-
+                        logger.error(f"❌ {name} 第 {page_num} 頁失敗：{str(e)[:120]}")
+                        break
         return all_news
